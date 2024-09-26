@@ -58,6 +58,16 @@ jobs:
           echo "ACTIONS_STEP_DEBUG=true" >> $GITHUB_ENV
           echo "AZURE_CLI_DEBUG=1" >> $GITHUB_ENV
 
+      - name: Azure CLI Version
+        run: az version
+
+      - name: Azure CLI login
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az login --allow-no-subscriptions
+            az account show
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
