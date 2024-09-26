@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Regression Test Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .card-header {
+            background-color: #E3F2FD; /* Light blue color */
+            color: #0D47A1; /* Darker blue for contrast */
+        }
+        .result-pill {
+            display: inline-block;
+            padding: 0.25em 0.6em;
+            font-size: 0.75em;
+            font-weight: 700;
+            line-height: 1;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: baseline;
+            border-radius: 10rem;
+        }
+        .result-pass {
+            color: #155724;
+            background-color: #d4edda;
+        }
+        .result-fail {
+            color: #721c24;
+            background-color: #f8d7da;
+        }
+        .result-null {
+            color: #856404;
+            background-color: #fff3cd;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="mb-4">Visual Regression Test Dashboard</h1>
+
+        <!-- Schedule Tests Card -->
+        <div class="card mb-5">
+            <div class="card-header">
+                <h2 class="h5 mb-0">Schedule Tests</h2>
+            </div>
+            <div class="card-body">
+                <form id="scheduleForm">
+                    <div class="mb-3">
+                        <label for="baseUrl" class="form-label">Base URL</label>
+                        <input type="text" class="form-control" id="baseUrl" required>
+                        <div id="baseUrlHelp" class="form-text">Enter the base URL for your tests, using {locale} as a placeholder for different locales.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="locales" class="form-label">Locales (comma-separated)</label>
+                        <input type="text" class="form-control" id="locales" required>
+                        <div id="localesHelp" class="form-text">Enter the locales you want to test, separated by commas.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="cronExpression" class="form-label">Cron Expression</label>
+                        <input type="text" class="form-control" id="cronExpression" required>
+                        <div id="cronHelp" class="form-text">Enter a cron expression to schedule your tests.</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Set Schedule</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Current Schedules Card -->
+        <div class="card mb-5">
+            <div class="card-header">
+                <h2 class="h5 mb-0">Current Schedules</h2>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table id="scheduleTable" class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Base URL</th>
+                                <th>Locales</th>
+                                <th>Cron Expression</th>
+                                <th>Run Count</th>
+                                <th>Last Run</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Schedule rows will be dynamically inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <!-- Test Results Visualization Card -->
+        <div class="card mb-5">
+            <div class="card-header">
+                <h2 class="h5 mb-0">Test Results Timeline</h2>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="dateRange" class="form-label">Date Range:</label>
+                    <select id="dateRange" class="form-select">
+                        <option value="7">Last 7 days</option>
+                        <option value="30">Last 30 days</option>
+                        <option value="90">Last 90 days</option>
+                    </select>
+                </div>
+                <div id="timelineCharts"></div>
+            </div>
+        </div>
+        <!-- Test Results Card -->
+        <div class="card mb-5">
+            <div class="card-header">
+                <h2 class="h5 mb-0">Test Results</h2>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table id="resultTable" class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>URL</th>
+                                <th>Result</th>
+                                <th>Status</th>
+                                <th>Diff %</th>
+                                <th>Images</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Test result rows will be dynamically inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for displaying images -->
+    <div class="modal fade" id="imageModal" tabindex="-1" aria-labelledby="imageModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="imageModalLabel">Test Images</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="image-container">
+                        <!-- Images will be dynamically inserted here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for displaying large images -->
+    <div class="modal fade" id="largeImageModal" tabindex="-1" aria-labelledby="largeImageModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="largeImageModalLabel">Large Image View</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="largeImage" src="" class="img-fluid" alt="Large view of test image">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for editing schedules -->
+    <div class="modal fade" id="editScheduleModal" tabindex="-1" aria-labelledby="editScheduleModalLabel">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editScheduleModalLabel">Edit Schedule</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editScheduleForm">
+                        <input type="hidden" id="editScheduleId">
+                        <div class="mb-3">
+                            <label for="editBaseUrl" class="form-label">Base URL</label>
+                            <input type="text" class="form-control" id="editBaseUrl" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editLocales" class="form-label">Locales (comma-separated)</label>
+                            <input type="text" class="form-control" id="editLocales" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editCronExpression" class="form-label">Cron Expression</label>
+                            <input type="text" class="form-control" id="editCronExpression" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" id="saveEditSchedule">Save changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
