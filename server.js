@@ -5,7 +5,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const bodyParser = require('body-parser');
 
 const app = express();
@@ -306,7 +306,7 @@ function runScheduledTest(baseUrl, locales) {
         const scriptPath = path.join(__dirname, 'pixletest.js');
 
         return new Promise((resolve, reject) => {
-            exec(`node "${scriptPath}" '${testConfig}'`, (error, stdout, stderr) => {
+            execFile(process.execPath, [scriptPath, testConfig], (error, stdout, stderr) => {
                 if (error) {
                     console.error(`Error executing Playwright script: ${error.message}`);
                     reject(error);
