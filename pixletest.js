@@ -68,31 +68,74 @@ function readJSONSafe(filePath) {
 }
 
 function writeJSONAtomic(filePath, data) {
-    const tmpPath = filePath + '.tmp';
+    // Use PID + random suffix to avoid temp file collisions between concurrent processes
+    const tmpPath = filePath + `.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
     fs.renameSync(tmpPath, filePath);
 }
 
+// File lock using mkdir (atomic on all platforms).
+// Prevents concurrent read-modify-write races on shared JSON files.
+function withFileLock(filePath, fn) {
+    const lockDir = filePath + '.lock';
+    const maxRetries = 50;
+    const retryDelay = 100; // ms
+    const staleLockAge = 30000; // 30 seconds -- assume holder crashed
+
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            fs.mkdirSync(lockDir);
+        } catch (err) {
+            if (err.code === 'EEXIST') {
+                // Check for stale lock (holder may have crashed)
+                try {
+                    const lockAge = Date.now() - fs.statSync(lockDir).mtimeMs;
+                    if (lockAge > staleLockAge) {
+                        console.warn(`Breaking stale lock on ${filePath} (age: ${lockAge}ms)`);
+                        fs.rmdirSync(lockDir);
+                    }
+                } catch { /* lock dir was removed between check and stat -- that's fine */ }
+
+                // Busy-wait before retrying
+                const start = Date.now();
+                while (Date.now() - start < retryDelay) { /* spin */ }
+                continue;
+            }
+            throw err;
+        }
+
+        // Lock acquired -- run the function, then release
+        try {
+            return fn();
+        } finally {
+            try { fs.rmdirSync(lockDir); } catch { /* already removed */ }
+        }
+    }
+    throw new Error(`Could not acquire lock on ${filePath} after ${maxRetries} retries`);
+}
+
 function saveTestResult(url, result, status, baselineImagePath, currentImagePath, diffImagePath = null, diffPercentage = null) {
     try {
-        const results = readJSONSafe(RESULTS_FILE);
+        withFileLock(RESULTS_FILE, () => {
+            const results = readJSONSafe(RESULTS_FILE);
 
-        const nextId = results.length > 0 ? Math.max(...results.map(r => r.id)) + 1 : 1;
-        const testResult = {
-            id: nextId,
-            test_date: new Date().toISOString(),
-            url,
-            result,
-            status,
-            baseline_image_path: baselineImagePath,
-            current_image_path: currentImagePath,
-            image_path: diffImagePath,
-            diff_percentage: diffPercentage
-        };
+            const nextId = results.length > 0 ? Math.max(...results.map(r => r.id)) + 1 : 1;
+            const testResult = {
+                id: nextId,
+                test_date: new Date().toISOString(),
+                url,
+                result,
+                status,
+                baseline_image_path: baselineImagePath,
+                current_image_path: currentImagePath,
+                image_path: diffImagePath,
+                diff_percentage: diffPercentage
+            };
 
-        results.push(testResult);
-        writeJSONAtomic(RESULTS_FILE, results);
-        console.log(`Test result saved: ${testResult.test_date}, ${url}, ${result}, ${status}, diff: ${diffPercentage}`);
+            results.push(testResult);
+            writeJSONAtomic(RESULTS_FILE, results);
+            console.log(`Test result saved: ${testResult.test_date}, ${url}, ${result}, ${status}, diff: ${diffPercentage}`);
+        });
     } catch (err) {
         console.error('Error saving test result:', err);
     }

@@ -349,6 +349,8 @@ The dashboard and all API endpoints are completely open. Anyone with the URL can
 
 5. **`pixletest.js` -- `saveTestResult()` was async but called without `await`** (resolved) -- The local version uses synchronous `fs.writeFileSync()`, so results are always persisted before the function returns.
 
+6. **`results.json` corruption from concurrent child processes** (resolved) -- When multiple cron schedules fired at the same time, two `pixletest.js` child processes would race on the same `results.json` file. Both used the same `.tmp` file path, so one process could overwrite the other's temp data mid-rename, producing truncated or concatenated JSON. Fixed by: (a) using unique temp file names per process (`PID + timestamp`), and (b) wrapping the read-modify-write cycle in `saveTestResult()` with a directory-based file lock (`mkdir` is atomic on all platforms).
+
 ### High
 
 6. **`pixletest.js:240` -- Hardcoded 15% threshold** -- Not configurable per schedule or per URL. Different pages need different thresholds.

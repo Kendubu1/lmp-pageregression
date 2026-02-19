@@ -44,7 +44,8 @@ function readJSON(filePath) {
 }
 
 function writeJSON(filePath, data) {
-    const tmpPath = filePath + '.tmp';
+    // Use PID + timestamp to avoid temp file collisions with concurrent child processes
+    const tmpPath = filePath + `.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
     fs.renameSync(tmpPath, filePath);
 }
