@@ -9,16 +9,17 @@ A visual regression testing tool that captures screenshots of web pages across m
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
-2. [How It Works](#how-it-works)
-3. [Local Development Setup](#local-development-setup)
-4. [Running the Application](#running-the-application)
-5. [Types of Testing & What They Cover](#types-of-testing--what-they-cover)
-6. [Challenges Encountered](#challenges-encountered)
-7. [Known Code Issues](#known-code-issues)
-8. [Refactoring Guide -- Isolating the Test Script](#refactoring-guide----isolating-the-test-script)
-9. [Project Structure](#project-structure)
-10. [API Reference](#api-reference)
-11. [Database Schema](#database-schema)
+2. [Pixel Comparison Libraries](#pixel-comparison-libraries)
+3. [How It Works](#how-it-works)
+4. [Local Development Setup](#local-development-setup)
+5. [Running the Application](#running-the-application)
+6. [Types of Testing & What They Cover](#types-of-testing--what-they-cover)
+7. [Challenges Encountered](#challenges-encountered)
+8. [Known Code Issues](#known-code-issues)
+9. [Refactoring Guide -- Isolating the Test Script](#refactoring-guide----isolating-the-test-script)
+10. [Project Structure](#project-structure)
+11. [API Reference](#api-reference)
+12. [Data Storage (Local JSON)](#data-storage-local-json)
 
 ---
 
@@ -51,6 +52,70 @@ A visual regression testing tool that captures screenshots of web pages across m
 | **Frontend** | Bootstrap 5, Chart.js, vanilla JS | Dashboard for managing schedules and viewing results |
 | **Scheduler** | node-cron | Triggers test runs on configurable cron schedules |
 | **CI/CD** | GitHub Actions | Build, test, and deploy to Azure App Service |
+
+---
+
+## Pixel Comparison Libraries
+
+The visual regression pipeline chains four libraries together to capture, normalise, compare, and visualise screenshots:
+
+### Playwright (`playwright`)
+
+[Playwright](https://playwright.dev/) is a browser automation framework from Microsoft. This project uses it to launch a headless **Chromium** instance, navigate to each URL, and capture full-page screenshots as PNG buffers. Key capabilities used:
+
+- **`page.screenshot({ fullPage: true })`** -- captures the entire scrollable page, not just the viewport.
+- **`waitUntil: 'networkidle'`** -- waits until there are no network requests for 500ms, helping ensure the page is fully loaded.
+- **`page.evaluate()`** -- runs JavaScript in the browser context to pause carousels, wait for fonts, and auto-scroll to trigger lazy-loaded content.
+- **Viewport fixed at 1920x1080** -- ensures consistent capture dimensions across runs.
+
+### pngjs (`pngjs`)
+
+[pngjs](https://github.com/lukeapage/pngjs) is a pure-JavaScript PNG encoder/decoder. It parses PNG image buffers into raw RGBA pixel arrays that `pixelmatch` can consume. In this project it is used to:
+
+- **Decode** baseline and current screenshot PNGs into `{ data, width, height }` objects.
+- **Encode** the diff output back into a PNG buffer for storage.
+- Both `PNG.sync.read()` (decoding) and `PNG.sync.write()` (encoding) are used for synchronous, in-process image handling.
+
+### sharp (`sharp`)
+
+[sharp](https://sharp.pixelplumbing.com/) is a high-performance image processing library built on `libvips`. It handles the dimension-normalisation step that is necessary when the baseline and current screenshots have different heights (e.g., page content grew or shrank between runs). Specifically:
+
+- **Resize with padding** -- `sharp(buffer).resize(maxWidth, maxHeight, { fit: 'contain', background: '#FFFFFF' })` scales the smaller image up to match the larger one, filling the extra space with white pixels.
+- **PNG conversion** -- ensures the output is always in PNG format with the correct colour depth for `pixelmatch`.
+- Without this step, `pixelmatch` would throw because it requires both input images to have identical dimensions.
+
+### pixelmatch (`pixelmatch`)
+
+[pixelmatch](https://github.com/mapbox/pixelmatch) is a lightweight, zero-dependency pixel-level image comparison library from Mapbox. It takes two RGBA pixel arrays of the same dimensions and produces a diff output plus a count of mismatched pixels:
+
+```js
+const numDiffPixels = pixelmatch(
+    baselinePixels,   // Uint8Array of RGBA values
+    currentPixels,    // Uint8Array of RGBA values
+    diffOutput,       // Uint8Array to write diff image into
+    width,
+    height,
+    { threshold: 0.1 }
+);
+```
+
+- **`threshold: 0.1`** -- controls colour sensitivity. A value of 0 catches every sub-pixel difference; 1 ignores everything. The project uses 0.1, which is the library's default and tolerates minor anti-aliasing variation.
+- **Diff percentage** -- calculated as `(numDiffPixels / totalPixels) * 100`. The project then applies a **15% pass/fail threshold** on top of this to determine the test result.
+- **Diff image** -- mismatched pixels are rendered in the output buffer. The project overlays red highlights (`rgba(255, 0, 0, 128)`) for changed pixels and transparent black for unchanged ones, then composites this into a viewable PNG.
+
+### How They Chain Together
+
+```
+Playwright          sharp              pngjs            pixelmatch         pngjs
+(capture PNG) --> (resize to     --> (decode to    --> (compare RGBA  --> (encode diff
+                   match dims)       RGBA arrays)      arrays)            to PNG)
+```
+
+1. **Playwright** captures two PNGs (baseline from storage, current from live page)
+2. **sharp** resizes both to the same dimensions if they differ
+3. **pngjs** decodes them into raw RGBA pixel arrays
+4. **pixelmatch** compares the arrays, outputs a diff array and mismatch count
+5. **pngjs** encodes the diff array back into a PNG for the dashboard to display
 
 ---
 
