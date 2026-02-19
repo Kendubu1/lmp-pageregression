@@ -268,18 +268,18 @@ function createTimelines(data) {
         new Chart(ctx, {
             type: 'line',
             data: {
-                labels: testData.dates,  // X-axis (dates)
+                labels: testData.dates,
                 datasets: [
                     {
                         label: 'Pass Rate (%)',
-                        data: testData.passRates,  // Y-axis for pass rates
+                        data: testData.passRates,
                         borderColor: 'rgba(75, 192, 192, 1)',
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
                         yAxisID: 'y-axis-1'
                     },
                     {
                         label: 'Avg Diff (%)',
-                        data: testData.avgDiffPercentages,  // Y-axis for avg diff
+                        data: testData.avgDiffPercentages,
                         borderColor: 'rgba(255, 206, 86, 1)',
                         backgroundColor: 'rgba(255, 206, 86, 0.2)',
                         yAxisID: 'y-axis-2'
@@ -288,12 +288,15 @@ function createTimelines(data) {
             },
             options: {
                 responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: testData.baseUrl
+                    }
+                },
                 scales: {
                     x: {
-                        type: 'time',  // Adjust time axis formatting if necessary
-                        time: {
-                            unit: 'day'
-                        }
+                        type: 'category'
                     },
                     'y-axis-1': {
                         type: 'linear',
