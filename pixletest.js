@@ -1,93 +1,84 @@
+require('dotenv').config();
+
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 const { PNG } = require('pngjs');
 const pixelmatch = require('pixelmatch');
-const sql = require('mssql');
 const sharp = require('sharp');
-const { BlobServiceClient } = require('@azure/storage-blob');
 
-const logFilePath = './test_log.txt';
+const logFilePath = path.join(__dirname, 'test_log.txt');
 
-// Azure Storage configuration
-const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME || 'images';
+// Local storage directories
+const DATA_DIR = path.join(__dirname, 'data');
+const IMAGES_DIR = path.join(__dirname, 'images');
+const RESULTS_FILE = path.join(DATA_DIR, 'results.json');
 
-const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
-const containerClient = blobServiceClient.getContainerClient(containerName);
-
-// Azure SQL Database configuration
-const sqlConfig = {
-    user: process.env.SQL_USER,
-    password: process.env.SQL_PASSWORD,
-    database: process.env.SQL_DATABASE,
-    server: process.env.SQL_SERVER,
-    pool: {
-        max: 10,
-        min: 0,
-        idleTimeoutMillis: 30000
-    },
-    options: {
-        encrypt: true,
-        trustServerCertificate: false
+// Ensure directories exist
+function ensureDir(dir) {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
     }
-};
+}
+
+ensureDir(DATA_DIR);
+ensureDir(path.join(IMAGES_DIR, 'baseline_images'));
+ensureDir(path.join(IMAGES_DIR, 'current_images'));
+ensureDir(path.join(IMAGES_DIR, 'diff_images'));
 
 function logToFile(message) {
     const timestamp = new Date().toISOString();
     fs.appendFileSync(logFilePath, `${timestamp} - ${message}\n`);
 }
 
-async function uploadToAzure(buffer, blobName) {
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-    await blockBlobClient.upload(buffer, buffer.length);
-    return blockBlobClient.url;
+function saveImageLocally(buffer, imageName) {
+    const filePath = path.join(IMAGES_DIR, imageName);
+    ensureDir(path.dirname(filePath));
+    fs.writeFileSync(filePath, buffer);
+    return imageName;
 }
 
-async function downloadFromAzure(blobName) {
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-    const downloadResponse = await blockBlobClient.download();
-    return await streamToBuffer(downloadResponse.readableStreamBody);
+function loadImageLocally(imageName) {
+    const filePath = path.join(IMAGES_DIR, imageName);
+    if (!fs.existsSync(filePath)) {
+        return null;
+    }
+    return fs.readFileSync(filePath);
 }
 
-async function streamToBuffer(readableStream) {
-    return new Promise((resolve, reject) => {
-        const chunks = [];
-        readableStream.on("data", (data) => {
-            chunks.push(data instanceof Buffer ? data : Buffer.from(data));
-        });
-        readableStream.on("end", () => {
-            resolve(Buffer.concat(chunks));
-        });
-        readableStream.on("error", reject);
-    });
+function getImageModifiedDate(imageName) {
+    const filePath = path.join(IMAGES_DIR, imageName);
+    if (!fs.existsSync(filePath)) {
+        return null;
+    }
+    const stats = fs.statSync(filePath);
+    return stats.mtime;
 }
 
-async function saveTestResult(url, result, status, baselineImageUrl, currentImageUrl, diffImageUrl = null, diffPercentage = null) {
+function saveTestResult(url, result, status, baselineImagePath, currentImagePath, diffImagePath = null, diffPercentage = null) {
     try {
-        await sql.connect(sqlConfig);
-        const testDate = new Date().toISOString();
-        const request = new sql.Request();
-        const query = `
-            INSERT INTO visual_tests (test_date, url, result, status, baseline_image_path, current_image_path, image_path, diff_percentage)
-            VALUES (@testDate, @url, @result, @status, @baselineImageUrl, @currentImageUrl, @diffImageUrl, @diffPercentage)
-        `;
-        request.input('testDate', sql.DateTime, testDate);
-        request.input('url', sql.NVarChar, url);
-        request.input('result', sql.NVarChar, result);  // <-- 'result' here refers to the parameter
-        request.input('status', sql.NVarChar, status);
-        request.input('baselineImageUrl', sql.NVarChar, baselineImageUrl);
-        request.input('currentImageUrl', sql.NVarChar, currentImageUrl);
-        request.input('diffImageUrl', sql.NVarChar, diffImageUrl);
-        request.input('diffPercentage', sql.Float, diffPercentage);
-        
-        const queryResult = await request.query(query);  // Rename the result from the query
-        console.log(`Test result saved: ${testDate}, ${url}, ${result}, ${status}, ${baselineImageUrl}, ${currentImageUrl}, ${diffImageUrl}, ${diffPercentage}`);
-        console.log(`Rows affected: ${queryResult.rowsAffected}`);  // Use 'queryResult' instead of 'result'
+        let results = [];
+        if (fs.existsSync(RESULTS_FILE)) {
+            results = JSON.parse(fs.readFileSync(RESULTS_FILE, 'utf-8'));
+        }
+
+        const testResult = {
+            id: results.length + 1,
+            test_date: new Date().toISOString(),
+            url,
+            result,
+            status,
+            baseline_image_path: baselineImagePath,
+            current_image_path: currentImagePath,
+            image_path: diffImagePath,
+            diff_percentage: diffPercentage
+        };
+
+        results.push(testResult);
+        fs.writeFileSync(RESULTS_FILE, JSON.stringify(results, null, 2));
+        console.log(`Test result saved: ${testResult.test_date}, ${url}, ${result}, ${status}, diff: ${diffPercentage}`);
     } catch (err) {
         console.error('Error saving test result:', err);
-    } finally {
-        await sql.close();
     }
 }
 
@@ -188,7 +179,6 @@ async function runVisualTest(browser, config) {
         await page.setViewportSize({ width: 1920, height: 1080 });
 
         try {
-            await page.waitForTimeout(6000);  // Wait for any final animations or content to settle
             await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
             await page.evaluate(() => document.fonts.ready);
 
@@ -207,48 +197,40 @@ async function runVisualTest(browser, config) {
 
             const screenshot = await page.screenshot({ fullPage: true });
 
-            let baselineExists = true;
-            try {
-                await downloadFromAzure(baselineImageName);
-            } catch (error) {
-                if (error.statusCode === 404) {
-                    baselineExists = false;
-                } else {
-                    throw error;
-                }
-            }
+            // Check if baseline exists locally
+            const existingBaseline = loadImageLocally(baselineImageName);
 
-            if (!baselineExists) {
-                const baselineImageUrl = await uploadToAzure(screenshot, baselineImageName);
-                const currentImageUrl = await uploadToAzure(screenshot, currentImageName);
-                saveTestResult(fullUrl, "Null", "Baseline image created.", baselineImageUrl, currentImageUrl);
+            if (!existingBaseline) {
+                saveImageLocally(screenshot, baselineImageName);
+                saveImageLocally(screenshot, currentImageName);
+                saveTestResult(fullUrl, "Null", "Baseline image created.", baselineImageName, currentImageName);
                 logToFile("Baseline image created for: " + fullUrl);
                 console.log("Baseline image created.");
                 continue;
             }
 
-            const baselineImageBuffer = await downloadFromAzure(baselineImageName);
+            const baselineImageBuffer = existingBaseline;
             const currentImageBuffer = screenshot;
 
             const { diffPixels, diffPercentage, diffBuffer } = await compareImages(baselineImageBuffer, currentImageBuffer);
 
             console.log(`Difference for ${fullUrl}: ${diffPercentage.toFixed(2)}%`);
 
-            const currentImageUrl = await uploadToAzure(currentImageBuffer, currentImageName);
-            const diffImageUrl = await uploadToAzure(diffBuffer, diffImageName);
+            const currentImagePath = saveImageLocally(currentImageBuffer, currentImageName);
+            const diffImagePath = saveImageLocally(diffBuffer, diffImageName);
 
             if (diffPercentage > 15) {  // Allow 15% difference
-                saveTestResult(fullUrl, "Fail", `Detected ${diffPixels} pixel differences (${diffPercentage.toFixed(2)}%).`, baselineImageName, currentImageUrl, diffImageUrl, diffPercentage);
+                saveTestResult(fullUrl, "Fail", `Detected ${diffPixels} pixel differences (${diffPercentage.toFixed(2)}%).`, baselineImageName, currentImagePath, diffImagePath, diffPercentage);
                 logToFile(`Detected significant differences for ${fullUrl}: ${diffPercentage.toFixed(2)}% different`);
             } else {
-                saveTestResult(fullUrl, "Pass", `Acceptable differences: ${diffPercentage.toFixed(2)}% different.`, baselineImageName, currentImageUrl, diffImageUrl, diffPercentage);
+                saveTestResult(fullUrl, "Pass", `Acceptable differences: ${diffPercentage.toFixed(2)}% different.`, baselineImageName, currentImagePath, diffImagePath, diffPercentage);
                 logToFile(`No significant differences for ${fullUrl}: ${diffPercentage.toFixed(2)}% different`);
             }
 
             // Update baseline with current image if it's a new day
-            const baselineLastModified = await containerClient.getBlockBlobClient(baselineImageName).getProperties();
-            if (baselineLastModified.lastModified.toISOString().split('T')[0] !== currentDate) {
-                await uploadToAzure(currentImageBuffer, baselineImageName);
+            const baselineModified = getImageModifiedDate(baselineImageName);
+            if (baselineModified && baselineModified.toISOString().split('T')[0] !== currentDate) {
+                saveImageLocally(currentImageBuffer, baselineImageName);
                 logToFile(`Updated baseline image for ${fullUrl}`);
                 console.log(`Updated baseline image for ${fullUrl}`);
             }
@@ -290,12 +272,15 @@ async function main() {
             console.error('Error parsing JSON from command line argument:', error);
             process.exit(1);
         }
-    } else {
+    } else if (fs.existsSync(path.join(__dirname, 'config.json'))) {
         testConfig = require('./config.json');
+    } else {
+        console.error('No test config provided. Pass JSON as argument or create config.json');
+        process.exit(1);
     }
-    
+
     const browser = await chromium.launch({
-        headless: true,  // Set to true for production runs
+        headless: true,
         args: ['--window-size=1920,1080'],
         slowMo: 50
     });

@@ -27,3 +27,7 @@ release.zip
 # Playwright
 playwright-report/
 test-results/
+
+# Local data (generated at runtime)
+data/
+images/

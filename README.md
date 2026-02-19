@@ -1,6 +1,8 @@
 # LMP Page Regression
 
-A visual regression testing tool that captures screenshots of web pages across multiple locales, compares them pixel-by-pixel against stored baselines, and reports on visual drift over time. Results are stored in Azure SQL Database with images in Azure Blob Storage. A web dashboard provides schedule management, test results, and trend visualisation.
+A visual regression testing tool that captures screenshots of web pages across multiple locales, compares them pixel-by-pixel against stored baselines, and reports on visual drift over time. Results and images are stored locally on the filesystem (JSON files + PNG images). A web dashboard provides schedule management, test results, and trend visualisation.
+
+**This branch runs fully locally -- no Azure, no SQL Server, no cloud credentials required.**
 
 ---
 
@@ -24,19 +26,19 @@ A visual regression testing tool that captures screenshots of web pages across m
 
 ```
 +------------------+       +---------------+       +--------------------+
-|  Browser (UI)    | <---> |  Express API  | <---> |  Azure SQL         |
-|  index.html      |       |  server.js    |       |  (schedules,       |
-|  app.js          |       |               |       |   visual_tests)    |
-|  Bootstrap 5     |       |  node-cron    |       +--------------------+
-|  Chart.js        |       |  (scheduler)  |
-+------------------+       +-------+-------+       +--------------------+
-                                   |               |  Azure Blob Storage|
-                                   |  spawns       |  (baseline, current|
-                                   v               |   diff images)     |
-                           +---------------+       +--------------------+
-                           | pixletest.js  | <---> |
-                           | (Playwright + |       |
-                           |  pixelmatch)  |       |
+|  Browser (UI)    | <---> |  Express API  | <---> |  Local filesystem  |
+|  index.html      |       |  server.js    |       |  data/             |
+|  app.js          |       |               |       |    schedules.json  |
+|  Bootstrap 5     |       |  node-cron    |       |    results.json    |
+|  Chart.js        |       |  (scheduler)  |       +--------------------+
++------------------+       +-------+-------+
+                                   |               +--------------------+
+                                   |  spawns       |  images/           |
+                                   v               |    baseline_images/|
+                           +---------------+       |    current_images/ |
+                           | pixletest.js  | <---> |    diff_images/    |
+                           | (Playwright + |       +--------------------+
+                           |  pixelmatch)  |
                            +---------------+
 ```
 
@@ -44,8 +46,8 @@ A visual regression testing tool that captures screenshots of web pages across m
 |-----------|-----------|---------|
 | **Server** | Express.js 4.x | REST API, static file serving, cron scheduling |
 | **Test Engine** | Playwright (Chromium) + pixelmatch + sharp | Screenshot capture, pixel-level comparison, image resize |
-| **Database** | Azure SQL (mssql driver) | Stores test results and schedule configuration |
-| **Image Storage** | Azure Blob Storage | Stores baseline, current, and diff PNG images |
+| **Data Storage** | Local JSON files (`data/`) | Stores test results and schedule configuration |
+| **Image Storage** | Local filesystem (`images/`) | Stores baseline, current, and diff PNG images |
 | **Frontend** | Bootstrap 5, Chart.js, vanilla JS | Dashboard for managing schedules and viewing results |
 | **Scheduler** | node-cron | Triggers test runs on configurable cron schedules |
 | **CI/CD** | GitHub Actions | Build, test, and deploy to Azure App Service |
@@ -70,8 +72,8 @@ A visual regression testing tool that captures screenshots of web pages across m
    - **No baseline exists**: The screenshot becomes the baseline; result is `Null`.
    - **Baseline exists**: Images are resized to matching dimensions, then compared with `pixelmatch` (threshold: `0.1`). A diff percentage is computed. Differences above 15% are marked `Fail`; at or below 15% are `Pass`.
    - A diff image is generated highlighting changed pixels in red.
-6. All images (baseline, current, diff) are uploaded to Azure Blob Storage.
-7. Results are saved to the `visual_tests` table in Azure SQL.
+6. All images (baseline, current, diff) are saved to the local `images/` directory.
+7. Results are appended to `data/results.json`.
 8. If the baseline was last modified on a previous day, it is automatically overwritten with the current screenshot ("rolling baseline").
 
 ### Dashboard Features
@@ -89,15 +91,16 @@ A visual regression testing tool that captures screenshots of web pages across m
 
 - **Node.js** 20.x (matches CI/CD pipeline)
 - **npm** (comes with Node.js)
-- **Azure SQL Database** accessible from your machine (or a local SQL Server -- see note below)
-- **Azure Storage Account** with a blob container (or Azurite local emulator -- see note below)
+
+That's it. No Azure, no SQL Server, no Docker, no cloud credentials.
 
 ### Step-by-Step
 
 ```bash
-# 1. Clone the repository
+# 1. Clone the repository and switch to the local-testing branch
 git clone <repo-url>
 cd lmp-pageregression
+git checkout claude/setup-local-testing-docs-Z3iG6
 
 # 2. Install dependencies
 npm install
@@ -105,52 +108,16 @@ npm install
 # 3. Install Playwright browsers (Chromium)
 npx playwright install --with-deps chromium
 
-# 4. Create your environment file
+# 4. (Optional) Create your environment file to customise the port
 cp .env.example .env
-# Edit .env and fill in your Azure credentials (see .env.example for details)
 
-# 5. Set up the database tables (run these against your Azure SQL or local SQL Server)
-#    See the "Database Schema" section below for the CREATE TABLE statements.
-
-# 6. Start the server
+# 5. Start the server
 npm start
-# or, for auto-reload during development:
-# npx nodemon server.js
 
-# 7. Open http://localhost:3000 in your browser
+# 6. Open http://localhost:3000 in your browser
 ```
 
-### Important: Environment Variables
-
-The app currently reads environment variables directly from `process.env`. There is no `dotenv` integration built in. To use a `.env` file locally, either:
-
-**Option A** -- Install dotenv (recommended for local dev):
-```bash
-npm install --save-dev dotenv
-```
-Then add this as the **first line** of both `server.js` and `pixletest.js`:
-```js
-require('dotenv').config();
-```
-
-**Option B** -- Export variables in your shell before running:
-```bash
-export AZURE_STORAGE_CONNECTION_STRING="..."
-export SQL_USER="..."
-export SQL_PASSWORD="..."
-export SQL_DATABASE="..."
-export SQL_SERVER="..."
-npm start
-```
-
-### Using Local Alternatives to Azure
-
-If you do not have Azure access, you can use local substitutes:
-
-| Azure Service | Local Alternative | Notes |
-|---------------|-------------------|-------|
-| Azure Blob Storage | [Azurite](https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite) | `npm install -g azurite && azurite --silent` then use the Azurite connection string |
-| Azure SQL Database | SQL Server in Docker | `docker run -e "ACCEPT_EULA=Y" -e "SA_PASSWORD=YourPassword123!" -p 1433:1433 -d mcr.microsoft.com/mssql/server:2022-latest` and set `trustServerCertificate: true` in sqlConfig |
+The `data/` and `images/` directories are created automatically on first run. Schedules are persisted to `data/schedules.json` and test results to `data/results.json`. Screenshots are saved under `images/`.
 
 ---
 
@@ -269,9 +236,9 @@ The 15% diff threshold is hardcoded. Different pages have different levels of ac
 
 When the baseline and current screenshots have different dimensions (which happens when page content changes height), images are resized with white padding to the larger dimensions. This white padding itself introduces diff pixels, inflating the diff percentage even when the actual content differences are minor.
 
-### 5. Azure Dependency for Local Development
+### 5. Azure Dependency for Local Development (Resolved)
 
-The project has a hard dependency on Azure Blob Storage and Azure SQL Database with no local fallback or mock mode. This makes local development difficult without Azure credentials and requires network access to cloud resources during every test run.
+The original project had a hard dependency on Azure Blob Storage and Azure SQL Database. **This branch removes all Azure dependencies** -- images are stored on the local filesystem and data is persisted to JSON files. No cloud credentials or network access are required.
 
 ### 6. Child Process Execution Model
 
@@ -295,19 +262,15 @@ The dashboard and all API endpoints are completely open. Anyone with the URL can
 
 ### Critical
 
-1. **No `.gitignore`** (added in this branch) -- Previously, `node_modules/`, `.env`, and `test_log.txt` could be committed accidentally.
+1. **No `.gitignore`** (fixed in this branch) -- Previously, `node_modules/`, `.env`, and `test_log.txt` could be committed accidentally.
 
-2. **No environment variable validation** -- Both `server.js` and `pixletest.js` will crash with an unhelpful error if any Azure env var is missing. `BlobServiceClient.fromConnectionString(undefined)` throws immediately at module load time (`server.js:17`, `pixletest.js:16`).
+2. ~~**No environment variable validation**~~ (resolved) -- Azure dependencies have been removed. The app now starts with no environment variables at all.
 
-3. **`server.js:354` -- Shell injection via `exec()`** -- The test config JSON is interpolated directly into a shell command:
-   ```js
-   exec(`node "${scriptPath}" '${testConfig}'`, ...)
-   ```
-   If `baseUrl` contains a single quote, the command breaks. If a malicious URL were submitted, it could execute arbitrary shell commands. Should use `execFile()` or `spawn()` with argument arrays instead.
+3. **`server.js` -- Shell injection via `exec()`** -- The test config JSON is interpolated directly into a shell command. If `baseUrl` contains a single quote, the command breaks. Should use `execFile()` or `spawn()` with argument arrays instead.
 
-4. **`server.js:17` -- Crash on startup without Azure Storage** -- `BlobServiceClient.fromConnectionString(connectionString)` is called at module scope. If `AZURE_STORAGE_CONNECTION_STRING` is not set, the server crashes before reaching any error handler.
+4. ~~**Crash on startup without Azure Storage**~~ (resolved) -- Azure SDK calls have been removed; the server starts cleanly.
 
-5. **`pixletest.js:224` -- Missing `await`** -- `saveTestResult()` is an async function but is called without `await` in multiple places (`pixletest.js:224`, `pixletest.js:241`, `pixletest.js:244`, `pixletest.js:256`). Results may not be saved if the browser closes before the promise resolves.
+5. **`pixletest.js` -- `saveTestResult()` was async but called without `await`** (resolved) -- The local version uses synchronous `fs.writeFileSync()`, so results are always persisted before the function returns.
 
 ### High
 
@@ -319,15 +282,15 @@ The dashboard and all API endpoints are completely open. Anyone with the URL can
 
 9. **`pixletest.js:249-254` -- Baseline auto-update logic** -- Updates the baseline whenever the blob's `lastModified` date differs from the current date. This means every first run of the day overwrites the baseline regardless of whether the current screenshot is correct.
 
-10. **`server.js:50-63` -- Database connection model** -- Uses a global `sql.connected` check and `sql.close()` after every request. Under concurrent requests, one handler can close the connection while another is using it. The `mssql` pool is designed to stay open; opening and closing per request defeats connection pooling.
+10. ~~**Database connection model**~~ (resolved) -- Azure SQL has been replaced with local JSON files. No connection pooling issues.
 
-11. **`pixletest.js:142-150` -- Diff image red highlight logic** -- The `redHighlight` buffer is allocated with `Buffer.alloc()` (all zeros). Non-diff pixels remain at RGBA `(0, 0, 0, 0)` (transparent black). Only diff pixels get `(255, 0, 0, 128)`. This works for the composite overlay, but the check `diff.data[i] === 255 && diff.data[i+1] === 0 && diff.data[i+2] === 0` is fragile -- `pixelmatch` can output diff colours that are not exactly `(255, 0, 0)` depending on anti-aliasing settings.
+11. **`pixletest.js:134-140` -- Diff image red highlight logic** -- The `redHighlight` buffer is allocated with `Buffer.alloc()` (all zeros). Non-diff pixels remain at RGBA `(0, 0, 0, 0)` (transparent black). Only diff pixels get `(255, 0, 0, 128)`. This works for the composite overlay, but the check `diff.data[i] === 255 && diff.data[i+1] === 0 && diff.data[i+2] === 0` is fragile -- `pixelmatch` can output diff colours that are not exactly `(255, 0, 0)` depending on anti-aliasing settings.
 
 12. **No `package-lock.json`** -- Without a lockfile, `npm install` can produce different dependency trees on different machines, leading to "works on my machine" issues.
 
 ### Medium
 
-13. **`server.js:496-500` -- Server startup blocks on database** -- `loadSchedulesFromDatabase()` must succeed (or at least not throw) before the server starts listening. If the database is temporarily unreachable, the server never starts.
+13. ~~**Server startup blocks on database**~~ (resolved) -- Schedules are now loaded from a local JSON file synchronously. The server always starts.
 
 14. **`pixletest.js:10` -- Log file in working directory** -- `test_log.txt` is written to `./` which depends on the CWD at runtime. In Azure App Service this may not be the project directory.
 
@@ -337,7 +300,7 @@ The dashboard and all API endpoints are completely open. Anyone with the URL can
 
 17. **Both workflows trigger on push to master** -- Two separate deployments (`lmp-pageregression` and `pwtesting`) deploy on every push, but `master_pwtesting.yml` runs `npx playwright test` with no test files, meaning it will either fail or skip.
 
-18. **`server.js:329-373` -- `runScheduledTest` opens and closes DB but test runs via subprocess open their own DB connection** -- Two separate database connections for one logical operation, with no coordination.
+18. ~~**Dual database connections**~~ (resolved) -- Both server and test engine now read/write the same local JSON files. No connection coordination needed.
 
 ---
 
@@ -347,15 +310,7 @@ If you want to extract `pixletest.js` into a standalone, reusable test runner (s
 
 ### Current Coupling Points
 
-`pixletest.js` is tightly coupled to Azure services at module scope:
-
-| Line(s) | Coupling | What it does |
-|---------|---------|-------------|
-| 13-17 | Azure Blob Storage | Initialises blob client at module load |
-| 20-34 | Azure SQL Database | Configures SQL connection at module load |
-| 41-45 | Azure Blob Storage | `uploadToAzure()` -- stores images |
-| 47-51 | Azure Blob Storage | `downloadFromAzure()` -- retrieves baselines |
-| 66-92 | Azure SQL Database | `saveTestResult()` -- persists results |
+In this branch, Azure dependencies have been removed from `pixletest.js`. The test engine now uses local filesystem functions directly. However, the storage functions are still inline rather than abstracted behind an interface, so the coupling is now to `fs` calls rather than Azure SDK calls.
 
 ### Refactoring Steps
 
@@ -478,7 +433,14 @@ lmp-pageregression/
 │   └── workflows/
 │       ├── master_lmp-pageregression.yml   # CI/CD: build + deploy to Azure App Service
 │       └── master_pwtesting.yml            # CI/CD: build + Playwright tests + deploy (broken)
-├── .env.example                            # Template for required environment variables
+├── data/                                   # Created at runtime (gitignored)
+│   ├── schedules.json                      # Persisted schedule configuration
+│   └── results.json                        # Persisted test results
+├── images/                                 # Created at runtime (gitignored)
+│   ├── baseline_images/                    # Reference screenshots
+│   ├── current_images/                     # Latest screenshots
+│   └── diff_images/                        # Red-highlighted diff overlays
+├── .env.example                            # Template for environment variables
 ├── .gitignore                              # Git ignore rules
 ├── app.js                                  # Frontend JavaScript (dashboard logic)
 ├── index.html                              # Frontend HTML (Bootstrap 5 dashboard)
@@ -487,12 +449,6 @@ lmp-pageregression/
 ├── README.md                               # This file
 └── server.js                               # Express API server + cron scheduler
 ```
-
-**Notable missing files**:
-- `package-lock.json` -- should be committed for reproducible builds
-- `playwright.config.js` -- no Playwright configuration file exists
-- `config.json` -- referenced as fallback in `pixletest.js` but not included
-- Any unit or integration test files
 
 ---
 
@@ -504,7 +460,7 @@ lmp-pageregression/
 | `GET` | `/api/test-results` | Returns all test results, ordered by date descending |
 | `GET` | `/api/schedules` | Returns all configured schedules with status |
 | `GET` | `/api/visualization-data?days=N` | Returns daily pass rate and avg diff % for the last N days (7, 30, or 90) |
-| `GET` | `/images/:path` | Streams a PNG image from Azure Blob Storage |
+| `GET` | `/images/:path` | Serves a PNG image from the local `images/` directory |
 | `POST` | `/api/set-schedule` | Creates a new test schedule. Body: `{ cronExpression, testConfig: { baseUrl, locales } }` |
 | `POST` | `/api/run-test` | Triggers an immediate test run. Body: `{ baseUrl }` |
 | `POST` | `/api/pause-schedule/:id` | Pauses a schedule |
@@ -514,35 +470,50 @@ lmp-pageregression/
 
 ---
 
-## Database Schema
+## Data Storage (Local JSON)
 
-### `schedules` table
+This branch stores all data as local JSON files. No database setup is required.
 
-```sql
-CREATE TABLE schedules (
-    id INT IDENTITY(1,1) PRIMARY KEY,
-    base_url NVARCHAR(500) NOT NULL,
-    locales NVARCHAR(MAX) NOT NULL,          -- JSON array string, e.g. '["en-us","fr-fr"]'
-    cron_expression NVARCHAR(100) NOT NULL,
-    run_count INT DEFAULT 0,
-    created_at DATETIME DEFAULT GETDATE(),
-    last_run DATETIME NULL,
-    is_paused BIT DEFAULT 0
-);
+### `data/schedules.json`
+
+```json
+[
+  {
+    "id": 1,
+    "base_url": "https://example.com/{locale}/page",
+    "locales": "[\"en-us\",\"fr-fr\"]",
+    "cron_expression": "0 */6 * * *",
+    "run_count": 5,
+    "created_at": "2025-01-15T10:00:00.000Z",
+    "last_run": "2025-01-15T18:00:00.000Z",
+    "is_paused": false
+  }
+]
 ```
 
-### `visual_tests` table
+### `data/results.json`
 
-```sql
-CREATE TABLE visual_tests (
-    id INT IDENTITY(1,1) PRIMARY KEY,
-    test_date DATETIME NOT NULL,
-    url NVARCHAR(500) NOT NULL,
-    result NVARCHAR(50) NOT NULL,            -- 'Pass', 'Fail', 'Null', 'Error'
-    status NVARCHAR(500) NOT NULL,           -- Human-readable description
-    baseline_image_path NVARCHAR(500) NULL,
-    current_image_path NVARCHAR(500) NULL,
-    image_path NVARCHAR(500) NULL,           -- Diff image path
-    diff_percentage FLOAT NULL
-);
+```json
+[
+  {
+    "id": 1,
+    "test_date": "2025-01-15T10:05:00.000Z",
+    "url": "https://example.com/en-us/page",
+    "result": "Pass",
+    "status": "Acceptable differences: 2.31% different.",
+    "baseline_image_path": "baseline_images/..._baseline.png",
+    "current_image_path": "current_images/..._current.png",
+    "image_path": "diff_images/..._diff.png",
+    "diff_percentage": 2.31
+  }
+]
+```
+
+### `images/` Directory
+
+```
+images/
+├── baseline_images/    # Reference screenshots (one per URL+date)
+├── current_images/     # Screenshots from each test run
+└── diff_images/        # Red-highlighted diff overlays
 ```
