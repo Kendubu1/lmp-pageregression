@@ -96,26 +96,38 @@ That's it. No Azure, no SQL Server, no Docker, no cloud credentials.
 
 ### Step-by-Step
 
+**Option A** -- Clone then switch branch:
 ```bash
-# 1. Clone the repository and switch to the local-testing branch
-git clone <repo-url>
+git clone https://github.com/Kendubu1/lmp-pageregression.git
 cd lmp-pageregression
 git checkout claude/setup-local-testing-docs-Z3iG6
+```
 
-# 2. Install dependencies
+**Option B** -- Clone the branch directly:
+```bash
+git clone -b claude/setup-local-testing-docs-Z3iG6 https://github.com/Kendubu1/lmp-pageregression.git
+cd lmp-pageregression
+```
+
+Then:
+```bash
+
+# 1. Install dependencies
 npm install
 
-# 3. Install Playwright browsers (Chromium)
+# 2. Install Playwright browsers (Chromium)
 npx playwright install --with-deps chromium
 
-# 4. (Optional) Create your environment file to customise the port
+# 3. (Optional) Create your environment file to customise the port
 cp .env.example .env
 
-# 5. Start the server
+# 4. Start the server
 npm start
 
-# 6. Open http://localhost:3000 in your browser
+# 5. Open http://localhost:3000 in your browser
 ```
+
+> **Note:** GitHub defaults to showing the `master` branch. This local-testing branch will not be selected automatically -- you must checkout or clone it explicitly using one of the options above.
 
 The `data/` and `images/` directories are created automatically on first run. Schedules are persisted to `data/schedules.json` and test results to `data/results.json`. Screenshots are saved under `images/`.
 
