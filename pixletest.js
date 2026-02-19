@@ -55,15 +55,31 @@ function getImageModifiedDate(imageName) {
     return stats.mtime;
 }
 
+function readJSONSafe(filePath) {
+    if (!fs.existsSync(filePath)) {
+        return [];
+    }
+    try {
+        return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    } catch (err) {
+        console.error(`Warning: ${filePath} was corrupted, starting fresh. Error: ${err.message}`);
+        return [];
+    }
+}
+
+function writeJSONAtomic(filePath, data) {
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2));
+    fs.renameSync(tmpPath, filePath);
+}
+
 function saveTestResult(url, result, status, baselineImagePath, currentImagePath, diffImagePath = null, diffPercentage = null) {
     try {
-        let results = [];
-        if (fs.existsSync(RESULTS_FILE)) {
-            results = JSON.parse(fs.readFileSync(RESULTS_FILE, 'utf-8'));
-        }
+        const results = readJSONSafe(RESULTS_FILE);
 
+        const nextId = results.length > 0 ? Math.max(...results.map(r => r.id)) + 1 : 1;
         const testResult = {
-            id: results.length + 1,
+            id: nextId,
             test_date: new Date().toISOString(),
             url,
             result,
@@ -75,7 +91,7 @@ function saveTestResult(url, result, status, baselineImagePath, currentImagePath
         };
 
         results.push(testResult);
-        fs.writeFileSync(RESULTS_FILE, JSON.stringify(results, null, 2));
+        writeJSONAtomic(RESULTS_FILE, results);
         console.log(`Test result saved: ${testResult.test_date}, ${url}, ${result}, ${status}, diff: ${diffPercentage}`);
     } catch (err) {
         console.error('Error saving test result:', err);
