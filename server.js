@@ -5,6 +5,7 @@ const sql = require('mssql');
 const { BlobServiceClient } = require('@azure/storage-blob');
 const cron = require('node-cron');
 const { exec } = require('child_process');
+const fs = require('fs');
 const bodyParser = require('body-parser');
 
 const app = express();
@@ -13,6 +14,19 @@ const port = process.env.PORT || 3000;
 // Azure Storage configuration
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME || 'images';
+
+if (!connectionString) {
+  console.error('FATAL: AZURE_STORAGE_CONNECTION_STRING environment variable is not set.');
+  process.exit(1);
+}
+
+const requiredSqlVars = ['SQL_USER', 'SQL_PASSWORD', 'SQL_DATABASE', 'SQL_SERVER'];
+for (const v of requiredSqlVars) {
+  if (!process.env[v]) {
+    console.error(`FATAL: ${v} environment variable is not set.`);
+    process.exit(1);
+  }
+}
 
 const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
 const containerClient = blobServiceClient.getContainerClient(containerName);
@@ -50,10 +64,19 @@ let schedules = {};
 let pool = null;
 
 async function getPool() {
-    if (!pool) {
+    if (!pool || !pool.connected) {
         console.log('Creating SQL connection pool...');
-        pool = await sql.connect(sqlConfig);
-        console.log('SQL connection pool created.');
+        try {
+            pool = await sql.connect(sqlConfig);
+            pool.on('error', (err) => {
+                console.error('SQL pool error, will reconnect on next request:', err.message);
+                pool = null;
+            });
+            console.log('SQL connection pool created.');
+        } catch (err) {
+            pool = null;
+            throw err;
+        }
     }
     return pool;
 }
@@ -314,11 +337,10 @@ async function runScheduledTest(baseUrl, locales) {
 
     // Write config to a temp file to avoid shell quoting issues on Windows
     const configPath = path.join(__dirname, `_test_config_${Date.now()}.json`);
-    const fs = require('fs');
     fs.writeFileSync(configPath, testConfig);
 
     return new Promise((resolve, reject) => {
-      exec(`node "${scriptPath}" "${configPath}"`, { timeout: 300000 }, (error, stdout, stderr) => {
+      exec(`node "${scriptPath}" "${configPath}"`, { timeout: 300000, cwd: __dirname }, (error, stdout, stderr) => {
         // Clean up temp config file
         try { fs.unlinkSync(configPath); } catch (e) { /* ignore */ }
 

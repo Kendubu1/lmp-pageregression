@@ -7,7 +7,7 @@ const sql = require('mssql');
 const sharp = require('sharp');
 const { BlobServiceClient } = require('@azure/storage-blob');
 
-const logFilePath = './test_log.txt';
+const logFilePath = path.join(__dirname, 'test_log.txt');
 
 // Azure Storage configuration
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -66,8 +66,17 @@ async function streamToBuffer(readableStream) {
 let dbPool = null;
 
 async function getDbPool() {
-    if (!dbPool) {
-        dbPool = await sql.connect(sqlConfig);
+    if (!dbPool || !dbPool.connected) {
+        try {
+            dbPool = await sql.connect(sqlConfig);
+            dbPool.on('error', (err) => {
+                console.error('SQL pool error in pixletest, will reconnect:', err.message);
+                dbPool = null;
+            });
+        } catch (err) {
+            dbPool = null;
+            throw err;
+        }
     }
     return dbPool;
 }
@@ -195,9 +204,9 @@ async function runVisualTest(browser, config) {
         await page.setViewportSize({ width: 1920, height: 1080 });
 
         try {
-            await page.waitForTimeout(6000);  // Wait for any final animations or content to settle
             await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
             await page.evaluate(() => document.fonts.ready);
+            await page.waitForTimeout(3000);  // Wait for any final animations or content to settle
 
             // Search for and pause carousels
             const carouselButtons = await page.$$('button.carousel-control-autoplay');
