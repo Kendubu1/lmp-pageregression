@@ -5,6 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "service:install": "pm2 start ecosystem.config.js && pm2 save",
+    "service:start": "pm2 start lmp-pageregression",
+    "service:stop": "pm2 stop lmp-pageregression",
+    "service:restart": "pm2 restart lmp-pageregression",
+    "service:logs": "pm2 logs lmp-pageregression",
+    "service:status": "pm2 status",
     "test": "echo \"Error: no test specified\" && exit 0"
   },
   "dependencies": {
