@@ -59,9 +59,9 @@
                         <div id="localesHelp" class="form-text">Enter the locales you want to test, separated by commas.</div>
                     </div>
                     <div class="mb-3">
-                        <label for="cronExpression" class="form-label">Cron Expression</label>
-                        <input type="text" class="form-control" id="cronExpression" required>
-                        <div id="cronHelp" class="form-text">Enter a cron expression to schedule your tests.</div>
+                        <label for="cronExpression" class="form-label">Schedule</label>
+                        <input type="text" class="form-control" id="cronExpression" placeholder="e.g. 14:30 or 0 */6 * * *" required>
+                        <div id="cronHelp" class="form-text">Enter a time like <strong>14:30</strong> to run daily at 2:30 PM, or a cron expression for advanced scheduling (e.g. <code>0 */6 * * *</code> for every 6 hours).</div>
                     </div>
                     <button type="submit" class="btn btn-primary">Set Schedule</button>
                 </form>
@@ -80,7 +80,7 @@
                             <tr>
                                 <th>Base URL</th>
                                 <th>Locales</th>
-                                <th>Cron Expression</th>
+                                <th>Schedule</th>
                                 <th>Run Count</th>
                                 <th>Last Run</th>
                                 <th>Status</th>
@@ -190,8 +190,9 @@
                             <input type="text" class="form-control" id="editLocales" required>
                         </div>
                         <div class="mb-3">
-                            <label for="editCronExpression" class="form-label">Cron Expression</label>
-                            <input type="text" class="form-control" id="editCronExpression" required>
+                            <label for="editCronExpression" class="form-label">Schedule</label>
+                            <input type="text" class="form-control" id="editCronExpression" placeholder="e.g. 14:30 or 0 */6 * * *" required>
+                            <div class="form-text">Enter a time like <strong>14:30</strong> for daily, or a cron expression.</div>
                         </div>
                     </form>
                 </div>

@@ -191,11 +191,17 @@ app.post('/api/resume-schedule/:id', async (req, res) => {
 // Update a schedule
 app.put('/api/update-schedule/:id', async (req, res) => {
   const id = parseInt(req.params.id);
-  const { cronExpression, testConfig } = req.body;
+  let { cronExpression, testConfig } = req.body;
   console.log(`Attempting to update schedule with ID: ${id}`);
 
+  // Support HH:MM format
+  const asCron = timeToCron(cronExpression);
+  if (asCron) {
+    cronExpression = asCron;
+  }
+
   if (!cron.validate(cronExpression)) {
-    return res.status(400).json({ error: 'Invalid cron expression' });
+    return res.status(400).json({ error: 'Invalid schedule. Use HH:MM (e.g. 14:30) for daily, or a cron expression.' });
   }
 
   try {
@@ -221,13 +227,30 @@ app.put('/api/update-schedule/:id', async (req, res) => {
   }
 });
 
+// Helper: convert HH:MM to cron expression (daily at that time)
+function timeToCron(timeStr) {
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = parseInt(match[1], 10);
+  const minute = parseInt(match[2], 10);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return `${minute} ${hour} * * *`;
+}
+
 // Set a new schedule
 app.post('/api/set-schedule', async (req, res) => {
-  const { cronExpression, testConfig } = req.body;
-  console.log(`Setting schedule for ${testConfig.baseUrl} with cron: ${cronExpression}`);
+  let { cronExpression, testConfig } = req.body;
+  console.log(`Setting schedule for ${testConfig.baseUrl} with input: ${cronExpression}`);
+
+  // Support HH:MM format — convert to cron
+  const asCron = timeToCron(cronExpression);
+  if (asCron) {
+    console.log(`Converted time "${cronExpression}" to cron: ${asCron}`);
+    cronExpression = asCron;
+  }
 
   if (!cron.validate(cronExpression)) {
-    return res.status(400).json({ error: 'Invalid cron expression' });
+    return res.status(400).json({ error: 'Invalid schedule. Use HH:MM (e.g. 14:30) for daily, or a cron expression.' });
   }
 
   try {
@@ -322,12 +345,6 @@ app.post('/api/run-test', async (req, res) => {
 async function runScheduledTest(baseUrl, locales) {
   console.log(`Running Playwright test for ${baseUrl} with locales: ${locales}`);
   try {
-    const db = await getPool();
-    const updateResult = await db.request()
-      .input('base_url', sql.NVarChar, baseUrl)
-      .query('UPDATE schedules SET run_count = run_count + 1, last_run = GETDATE() WHERE base_url = @base_url');
-    console.log(`Schedule updated for ${baseUrl}. Rows affected: ${updateResult.rowsAffected}`);
-
     const testConfig = JSON.stringify({
       tests: [{ baseUrl, locales }]
     });
@@ -340,25 +357,43 @@ async function runScheduledTest(baseUrl, locales) {
     fs.writeFileSync(configPath, testConfig);
 
     return new Promise((resolve, reject) => {
-      exec(`node "${scriptPath}" "${configPath}"`, { timeout: 300000, cwd: __dirname }, (error, stdout, stderr) => {
+      exec(`node "${scriptPath}" "${configPath}"`, { timeout: 300000, cwd: __dirname }, async (error, stdout, stderr) => {
         // Clean up temp config file
         try { fs.unlinkSync(configPath); } catch (e) { /* ignore */ }
 
+        if (stdout) console.log(`Playwright output: ${stdout}`);
+        if (stderr) console.error(`Playwright stderr: ${stderr}`);
+
         if (error) {
           console.error(`Error executing Playwright script: ${error.message}`);
-          if (stderr) console.error(`Playwright stderr: ${stderr}`);
+          // Update last_run but NOT run_count on failure
+          try {
+            const db = await getPool();
+            await db.request()
+              .input('base_url', sql.NVarChar, baseUrl)
+              .query('UPDATE schedules SET last_run = GETDATE() WHERE base_url = @base_url');
+          } catch (dbErr) {
+            console.error('Failed to update last_run after error:', dbErr.message);
+          }
           reject(error);
           return;
         }
-        console.log(`Playwright script output: ${stdout}`);
-        if (stderr) {
-          console.error(`Playwright script errors: ${stderr}`);
+
+        // Only increment run_count on SUCCESS
+        try {
+          const db = await getPool();
+          await db.request()
+            .input('base_url', sql.NVarChar, baseUrl)
+            .query('UPDATE schedules SET run_count = run_count + 1, last_run = GETDATE() WHERE base_url = @base_url');
+          console.log(`Run count incremented for ${baseUrl} after successful test`);
+        } catch (dbErr) {
+          console.error('Failed to update run_count after success:', dbErr.message);
         }
         resolve(stdout);
       });
     });
   } catch (err) {
-    console.error('Error running scheduled test or updating schedule:', err);
+    console.error('Error running scheduled test:', err);
     throw err;
   }
 }
