@@ -7,7 +7,7 @@ const sql = require('mssql');
 const sharp = require('sharp');
 const { BlobServiceClient } = require('@azure/storage-blob');
 
-const logFilePath = './test_log.txt';
+const logFilePath = path.join(__dirname, 'test_log.txt');
 
 // Azure Storage configuration
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -63,31 +63,47 @@ async function streamToBuffer(readableStream) {
     });
 }
 
+let dbPool = null;
+
+async function getDbPool() {
+    if (!dbPool || !dbPool.connected) {
+        try {
+            dbPool = await sql.connect(sqlConfig);
+            dbPool.on('error', (err) => {
+                console.error('SQL pool error in pixletest, will reconnect:', err.message);
+                dbPool = null;
+            });
+        } catch (err) {
+            dbPool = null;
+            throw err;
+        }
+    }
+    return dbPool;
+}
+
 async function saveTestResult(url, result, status, baselineImageUrl, currentImageUrl, diffImageUrl = null, diffPercentage = null) {
     try {
-        await sql.connect(sqlConfig);
+        const pool = await getDbPool();
         const testDate = new Date().toISOString();
-        const request = new sql.Request();
+        const request = pool.request();
         const query = `
             INSERT INTO visual_tests (test_date, url, result, status, baseline_image_path, current_image_path, image_path, diff_percentage)
             VALUES (@testDate, @url, @result, @status, @baselineImageUrl, @currentImageUrl, @diffImageUrl, @diffPercentage)
         `;
         request.input('testDate', sql.DateTime, testDate);
         request.input('url', sql.NVarChar, url);
-        request.input('result', sql.NVarChar, result);  // <-- 'result' here refers to the parameter
+        request.input('result', sql.NVarChar, result);
         request.input('status', sql.NVarChar, status);
         request.input('baselineImageUrl', sql.NVarChar, baselineImageUrl);
         request.input('currentImageUrl', sql.NVarChar, currentImageUrl);
         request.input('diffImageUrl', sql.NVarChar, diffImageUrl);
         request.input('diffPercentage', sql.Float, diffPercentage);
-        
-        const queryResult = await request.query(query);  // Rename the result from the query
-        console.log(`Test result saved: ${testDate}, ${url}, ${result}, ${status}, ${baselineImageUrl}, ${currentImageUrl}, ${diffImageUrl}, ${diffPercentage}`);
-        console.log(`Rows affected: ${queryResult.rowsAffected}`);  // Use 'queryResult' instead of 'result'
+
+        const queryResult = await request.query(query);
+        console.log(`Test result saved: ${testDate}, ${url}, ${result}, ${status}`);
+        console.log(`Rows affected: ${queryResult.rowsAffected}`);
     } catch (err) {
         console.error('Error saving test result:', err);
-    } finally {
-        await sql.close();
     }
 }
 
@@ -188,9 +204,9 @@ async function runVisualTest(browser, config) {
         await page.setViewportSize({ width: 1920, height: 1080 });
 
         try {
-            await page.waitForTimeout(6000);  // Wait for any final animations or content to settle
             await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
             await page.evaluate(() => document.fonts.ready);
+            await page.waitForTimeout(3000);  // Wait for any final animations or content to settle
 
             // Search for and pause carousels
             const carouselButtons = await page.$$('button.carousel-control-autoplay');
@@ -221,7 +237,7 @@ async function runVisualTest(browser, config) {
             if (!baselineExists) {
                 const baselineImageUrl = await uploadToAzure(screenshot, baselineImageName);
                 const currentImageUrl = await uploadToAzure(screenshot, currentImageName);
-                saveTestResult(fullUrl, "Null", "Baseline image created.", baselineImageUrl, currentImageUrl);
+                await saveTestResult(fullUrl, "Null", "Baseline image created.", baselineImageUrl, currentImageUrl);
                 logToFile("Baseline image created for: " + fullUrl);
                 console.log("Baseline image created.");
                 continue;
@@ -238,10 +254,10 @@ async function runVisualTest(browser, config) {
             const diffImageUrl = await uploadToAzure(diffBuffer, diffImageName);
 
             if (diffPercentage > 15) {  // Allow 15% difference
-                saveTestResult(fullUrl, "Fail", `Detected ${diffPixels} pixel differences (${diffPercentage.toFixed(2)}%).`, baselineImageName, currentImageUrl, diffImageUrl, diffPercentage);
+                await saveTestResult(fullUrl, "Fail", `Detected ${diffPixels} pixel differences (${diffPercentage.toFixed(2)}%).`, baselineImageName, currentImageUrl, diffImageUrl, diffPercentage);
                 logToFile(`Detected significant differences for ${fullUrl}: ${diffPercentage.toFixed(2)}% different`);
             } else {
-                saveTestResult(fullUrl, "Pass", `Acceptable differences: ${diffPercentage.toFixed(2)}% different.`, baselineImageName, currentImageUrl, diffImageUrl, diffPercentage);
+                await saveTestResult(fullUrl, "Pass", `Acceptable differences: ${diffPercentage.toFixed(2)}% different.`, baselineImageName, currentImageUrl, diffImageUrl, diffPercentage);
                 logToFile(`No significant differences for ${fullUrl}: ${diffPercentage.toFixed(2)}% different`);
             }
 
@@ -253,7 +269,7 @@ async function runVisualTest(browser, config) {
                 console.log(`Updated baseline image for ${fullUrl}`);
             }
         } catch (error) {
-            saveTestResult(fullUrl, "Error", error.message, baselineImageName, currentImageName);
+            await saveTestResult(fullUrl, "Error", error.message, baselineImageName, currentImageName);
             logToFile(`Error processing ${fullUrl}: ${error.message}`);
         } finally {
             await page.close();
@@ -281,17 +297,28 @@ async function autoScroll(page) {
 }
 
 async function main() {
-    // Parse the command line argument
+    // Parse the command line argument (supports JSON string, file path, or fallback to config.json)
     let testConfig;
     if (process.argv[2]) {
+        const arg = process.argv[2];
         try {
-            testConfig = JSON.parse(process.argv[2]);
+            // Try as a file path first (used by server.js temp config files)
+            if (fs.existsSync(arg)) {
+                const fileContent = fs.readFileSync(arg, 'utf8');
+                testConfig = JSON.parse(fileContent);
+                console.log(`Loaded config from file: ${arg}`);
+            } else {
+                // Fall back to parsing as inline JSON
+                testConfig = JSON.parse(arg);
+                console.log('Parsed config from command line argument');
+            }
         } catch (error) {
-            console.error('Error parsing JSON from command line argument:', error);
+            console.error('Error parsing test config:', error);
             process.exit(1);
         }
     } else {
         testConfig = require('./config.json');
+        console.log('Loaded config from config.json');
     }
     
     const browser = await chromium.launch({
@@ -304,4 +331,12 @@ async function main() {
     await browser.close();
 }
 
-main().catch(console.error);
+main()
+    .then(() => {
+        console.log('Visual test run completed successfully.');
+        process.exit(0);
+    })
+    .catch((error) => {
+        console.error('Visual test run failed:', error);
+        process.exit(1);
+    });
