@@ -13,6 +13,18 @@ const logFilePath = path.join(__dirname, 'test_log.txt');
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME || 'images';
 
+if (!connectionString) {
+    console.error('FATAL: AZURE_STORAGE_CONNECTION_STRING is not set.');
+    process.exit(1);
+}
+const requiredSqlVars = ['SQL_USER', 'SQL_PASSWORD', 'SQL_DATABASE', 'SQL_SERVER'];
+for (const v of requiredSqlVars) {
+    if (!process.env[v]) {
+        console.error(`FATAL: ${v} environment variable is not set.`);
+        process.exit(1);
+    }
+}
+
 const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
 const containerClient = blobServiceClient.getContainerClient(containerName);
 
@@ -191,6 +203,8 @@ async function compareImages(baselineImageBuffer, currentImageBuffer) {
 }
 
 async function runVisualTest(browser, config) {
+    let successCount = 0;
+    let failCount = 0;
     for (const locale of config.locales) {
         const fullUrl = config.baseUrl.replace('{locale}', locale);
         const urlSlug = fullUrl.replace(/[^a-zA-Z0-9]/g, '_');
@@ -268,13 +282,16 @@ async function runVisualTest(browser, config) {
                 logToFile(`Updated baseline image for ${fullUrl}`);
                 console.log(`Updated baseline image for ${fullUrl}`);
             }
+            successCount++;
         } catch (error) {
+            failCount++;
             await saveTestResult(fullUrl, "Error", error.message, baselineImageName, currentImageName);
             logToFile(`Error processing ${fullUrl}: ${error.message}`);
         } finally {
             await page.close();
         }
     }
+    return { successCount, failCount };
 }
 
 async function autoScroll(page) {
@@ -327,8 +344,18 @@ async function main() {
         slowMo: 50
     });
 
-    await runVisualTest(browser, testConfig.tests[0]);
-    await browser.close();
+    try {
+        const { successCount, failCount } = await runVisualTest(browser, testConfig.tests[0]);
+        console.log(`Test results: ${successCount} succeeded, ${failCount} failed`);
+        if (successCount === 0 && failCount > 0) {
+            throw new Error(`All ${failCount} locale tests failed — no screenshots generated`);
+        }
+    } finally {
+        await browser.close();
+        if (dbPool) {
+            try { await dbPool.close(); } catch (e) { /* ignore */ }
+        }
+    }
 }
 
 main()

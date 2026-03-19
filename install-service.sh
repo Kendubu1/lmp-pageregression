@@ -1,6 +1,23 @@
 #!/bin/bash
 # Install and configure lmp-pageregression as a startup service using pm2
 
+echo ""
+echo "=== Checking required environment variables ==="
+MISSING=0
+for VAR in AZURE_STORAGE_CONNECTION_STRING SQL_USER SQL_PASSWORD SQL_DATABASE SQL_SERVER; do
+    if [ -z "${!VAR}" ]; then
+        echo "ERROR: $VAR is not set."
+        MISSING=1
+    fi
+done
+if [ "$MISSING" -eq 1 ]; then
+    echo ""
+    echo "Please set all required environment variables before running this script."
+    echo "You can add them to /etc/environment or your shell profile (~/.bashrc, ~/.zshrc)."
+    exit 1
+fi
+echo "All required environment variables are set."
+
 echo "Installing pm2 globally..."
 npm install -g pm2
 
@@ -25,6 +42,9 @@ pm2 startup
 echo ""
 echo "Service installed successfully!"
 echo "If prompted above, copy and run the sudo command to enable startup."
+echo ""
+echo "IMPORTANT: If you change environment variables later, run:"
+echo "  pm2 restart lmp-pageregression --update-env"
 echo ""
 echo "Useful commands:"
 echo "  pm2 status          - Check service status"

@@ -229,6 +229,7 @@ app.put('/api/update-schedule/:id', async (req, res) => {
 
 // Helper: convert HH:MM to cron expression (daily at that time)
 function timeToCron(timeStr) {
+  if (typeof timeStr !== 'string') return null;
   const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return null;
   const hour = parseInt(match[1], 10);

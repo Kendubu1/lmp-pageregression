@@ -7,20 +7,19 @@ module.exports = {
     autorestart: true,
     watch: false,
     max_memory_restart: '500M',
+    // Pull required env vars from the system environment at start time.
+    // PM2 snapshots these when you run `pm2 start` + `pm2 save`, so they
+    // persist across reboots via `pm2 resurrect`.
+    // If you change env vars later, run: pm2 restart lmp-pageregression --update-env
     env: {
       NODE_ENV: 'production',
-      PORT: 3000,
-      // These MUST be set before running the service.
-      // Option 1: Set them here directly (not recommended for secrets).
-      // Option 2: Set them as system environment variables.
-      // Option 3: Use a .env file with pm2's env_production or dotenv.
-      //
-      // AZURE_STORAGE_CONNECTION_STRING: '',
-      // AZURE_STORAGE_CONTAINER_NAME: 'images',
-      // SQL_USER: '',
-      // SQL_PASSWORD: '',
-      // SQL_DATABASE: '',
-      // SQL_SERVER: '',
+      PORT: process.env.PORT || 3000,
+      AZURE_STORAGE_CONNECTION_STRING: process.env.AZURE_STORAGE_CONNECTION_STRING || '',
+      AZURE_STORAGE_CONTAINER_NAME: process.env.AZURE_STORAGE_CONTAINER_NAME || 'images',
+      SQL_USER: process.env.SQL_USER || '',
+      SQL_PASSWORD: process.env.SQL_PASSWORD || '',
+      SQL_DATABASE: process.env.SQL_DATABASE || '',
+      SQL_SERVER: process.env.SQL_SERVER || '',
     },
     // Log configuration
     log_date_format: 'YYYY-MM-DD HH:mm:ss',

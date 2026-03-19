@@ -4,16 +4,35 @@ REM Run this script as Administrator
 
 echo.
 echo === Checking required environment variables ===
+set MISSING=0
 if "%AZURE_STORAGE_CONNECTION_STRING%"=="" (
     echo ERROR: AZURE_STORAGE_CONNECTION_STRING is not set.
-    echo Please set all required environment variables as system variables before running this script:
-    echo   AZURE_STORAGE_CONNECTION_STRING
-    echo   SQL_USER, SQL_PASSWORD, SQL_DATABASE, SQL_SERVER
+    set MISSING=1
+)
+if "%SQL_USER%"=="" (
+    echo ERROR: SQL_USER is not set.
+    set MISSING=1
+)
+if "%SQL_PASSWORD%"=="" (
+    echo ERROR: SQL_PASSWORD is not set.
+    set MISSING=1
+)
+if "%SQL_DATABASE%"=="" (
+    echo ERROR: SQL_DATABASE is not set.
+    set MISSING=1
+)
+if "%SQL_SERVER%"=="" (
+    echo ERROR: SQL_SERVER is not set.
+    set MISSING=1
+)
+if %MISSING%==1 (
     echo.
+    echo Please set all required environment variables as SYSTEM variables before running this script.
     echo You can set them via: System Properties ^> Environment Variables ^> System Variables
     pause
     exit /b 1
 )
+echo All required environment variables are set.
 
 echo Installing pm2 globally...
 call npm install -g pm2
@@ -41,9 +60,8 @@ echo.
 echo Service installed successfully!
 echo The service will now start automatically when Windows starts.
 echo.
-echo IMPORTANT: Make sure your Azure and SQL environment variables are set
-echo as SYSTEM environment variables (not user-level) so the service can
-echo access them on boot.
+echo IMPORTANT: If you change environment variables later, run:
+echo   pm2 restart lmp-pageregression --update-env
 echo.
 echo Useful commands:
 echo   pm2 status          - Check service status
