@@ -247,55 +247,71 @@ function updateVisualization(days) {
 
 function createTimelines(data) {
     const container = document.getElementById('timelineCharts');
-    container.innerHTML = ''; // Clear existing charts
+    container.innerHTML = '';
 
-    // Loop through the data for each test and create a chart
-    Object.entries(data).forEach(([testId, testData]) => {
+    const entries = Object.entries(data);
+    if (entries.length === 0) {
+        container.innerHTML = '<p class="text-muted">No test data available for the selected period.</p>';
+        return;
+    }
+
+    entries.forEach(([testId, testData]) => {
         if (!Array.isArray(testData.dates) || !Array.isArray(testData.passRates) || !Array.isArray(testData.avgDiffPercentages)) {
             console.error(`Invalid data format for test ID ${testId}`, testData);
-            return;  // Skip this entry if the data format is invalid
+            return;
         }
-    
+
         const canvasWrapper = document.createElement('div');
         canvasWrapper.className = 'mb-4';
         const canvas = document.createElement('canvas');
         canvas.id = `chart-${testId}`;
         canvasWrapper.appendChild(canvas);
         container.appendChild(canvasWrapper);
-    
+
         const ctx = canvas.getContext('2d');
-    
+
         new Chart(ctx, {
             type: 'line',
             data: {
-                labels: testData.dates,  // X-axis (dates)
+                labels: testData.dates,
                 datasets: [
                     {
                         label: 'Pass Rate (%)',
-                        data: testData.passRates,  // Y-axis for pass rates
+                        data: testData.passRates,
                         borderColor: 'rgba(75, 192, 192, 1)',
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        yAxisID: 'y-axis-1'
+                        yAxisID: 'yPassRate'
                     },
                     {
                         label: 'Avg Diff (%)',
-                        data: testData.avgDiffPercentages,  // Y-axis for avg diff
+                        data: testData.avgDiffPercentages,
                         borderColor: 'rgba(255, 206, 86, 1)',
                         backgroundColor: 'rgba(255, 206, 86, 0.2)',
-                        yAxisID: 'y-axis-2'
+                        yAxisID: 'yAvgDiff'
                     }
                 ]
             },
             options: {
                 responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: testData.baseUrl || `Schedule ${testId}`
+                    }
+                },
                 scales: {
                     x: {
-                        type: 'time',  // Adjust time axis formatting if necessary
+                        type: 'time',
                         time: {
-                            unit: 'day'
+                            unit: 'day',
+                            tooltipFormat: 'MMM d, yyyy'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Date'
                         }
                     },
-                    'y-axis-1': {
+                    yPassRate: {
                         type: 'linear',
                         display: true,
                         position: 'left',
@@ -306,7 +322,7 @@ function createTimelines(data) {
                         min: 0,
                         max: 100
                     },
-                    'y-axis-2': {
+                    yAvgDiff: {
                         type: 'linear',
                         display: true,
                         position: 'right',
@@ -323,7 +339,6 @@ function createTimelines(data) {
             }
         });
     });
-    
 }
 
 

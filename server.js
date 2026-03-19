@@ -494,8 +494,8 @@ app.get('/api/visualization-data', async (req, res) => {
         };
       }
       visualizationData[row.schedule_id].dates.push(row.date.toISOString().split('T')[0]);
-      visualizationData[row.schedule_id].passRates.push(parseFloat(row.pass_rate.toFixed(2)));
-      visualizationData[row.schedule_id].avgDiffPercentages.push(parseFloat(row.avg_diff_percentage.toFixed(2)));
+      visualizationData[row.schedule_id].passRates.push(parseFloat((row.pass_rate || 0).toFixed(2)));
+      visualizationData[row.schedule_id].avgDiffPercentages.push(parseFloat((row.avg_diff_percentage || 0).toFixed(2)));
     });
 
     res.json(visualizationData);
